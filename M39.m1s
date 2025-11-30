@@ -1,0 +1,134 @@
+' ---------------------------------------------------------
+' Mach3 Corner Probe Macro - M900
+' Probes Z, then X+, returns to original X (machine coords),
+' moves to Y wall, probes Y+. Uses ProbeRadius.
+' ---------------------------------------------------------
+
+Dim ZSafe, ZDown, ProbeFeed, Retract, ProbeRadius
+Dim XWall, YWall
+Dim xHit, yHit
+Dim xStartMC
+
+' -------------------------
+' USER SETTINGS
+' -------------------------
+
+ZSafe       = 1.0       ' Safe Z height above part
+ZDown       = -0.2      ' Z height for X/Y probing below surface
+ProbeFeed   = 5         ' Probing feedrate
+Retract     = 0.1       ' Retract after a hit
+ProbeRadius = 0.125     ' Radius of probe tip
+
+XWall       = 0.25       ' Move toward X wall before probing
+YWall       = 0.25       ' Move toward Y wall before probing
+
+' -------------------------
+' SAFETY CHECKS
+' -------------------------
+
+If IsSuchSignal(22) Then
+    Message "ERROR: Probe triggered before starting!"
+    Exit Sub
+End If
+
+' Store original X *machine coordinate* (safe from G31 effects)
+xStartMC = GetOEMDRO(83)   ' OEMDRO 83 = Machine Coord X
+
+' -------------------------
+' Z PROBING
+' -------------------------
+
+Code "G91 G31 Z-3 F" & ProbeFeed
+While IsMoving(): Wend
+
+If Not IsSuchSignal(22) Then
+    Message "ERROR: No Z probe hit."
+    Exit Sub
+End If
+
+' Retract to safe Z
+Code "G91 G0 Z" & ZSafe
+While IsMoving(): Wend
+
+
+' ---------------------------------------------------------
+' X PROBING SEQUENCE
+' ---------------------------------------------------------
+
+' Move toward X wall
+Code "G91 G0 X" & XWall
+While IsMoving(): Wend
+
+' Drop into probing height
+Code "G90 G0 Z" & ZDown
+While IsMoving(): Wend
+
+' Probe in +X direction
+Code "G31 X3 F" & ProbeFeed
+While IsMoving(): Wend
+
+If Not IsSuchSignal(22) Then
+    Message "ERROR: No X probe hit."
+    Exit Sub
+End If
+
+xHit = GetVar(2000) - ProbeRadius
+
+' Retract from wall
+Code "G91 G0 X-" & Retract
+While IsMoving(): Wend
+
+' Return up to safe Z
+Code "G91 G0 Z" & ZSafe
+While IsMoving(): Wend
+
+
+' ---------------------------------------------------------
+' RETURN TO ORIGINAL X POSITION (MACHINE COORD)
+' ---------------------------------------------------------
+
+Code "G53 G0 X" & xStartMC   ' G53 = machine coordinate move
+While IsMoving(): Wend
+
+
+' ---------------------------------------------------------
+' Y PROBING SEQUENCE
+' ---------------------------------------------------------
+
+' Move toward Y wall
+Code "G91 G0 Y" & YWall
+While IsMoving(): Wend
+
+' Drop down to probing height again
+Code "G90 G0 Z" &  ZDown
+While IsMoving(): Wend
+
+' Probe in +Y
+Code "G31 Y3 F" & ProbeFeed
+While IsMoving(): Wend
+
+If Not IsSuchSignal(22) Then
+    Message "ERROR: No Y probe hit."
+    Exit Sub
+End If
+
+yHit = GetVar(2001) - ProbeRadius
+
+' Retract from wall
+Code "G91 G0 Y-" & Retract
+While IsMoving(): Wend
+
+
+' ---------------------------------------------------------
+' STORE RESULTS INTO CURRENT WORK OFFSET (G54)
+' ---------------------------------------------------------
+' Z is already set by g31 we store here to account for probe radius
+
+SetOEMDRO(59, xHit)
+SetOEMDRO(60, yHit)
+
+' Final safe move up
+Code "G90 G0 Z" & ZSafe
+While IsMoving(): Wend
+
+Message "Corner probing complete!"
